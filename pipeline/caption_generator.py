@@ -20,6 +20,15 @@ def _style(format_name: str) -> tuple[int, int, int, int]:
 
 
 def generate_captions(script_path: str = "script.json", timing_dir: str = ".", output_path: str = "final_captions.ass") -> str:
+    import os
+    job_id = os.environ.get("JOB_ID")
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=55, log_message="Generating captions and subtitles...")
+        except Exception:
+            pass
+
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     play_x, play_y, font_size, margin_v = _style(script.get("format", "reels"))
     events: list[str] = []
@@ -51,6 +60,14 @@ Style: Default,DejaVu Sans Bold,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H8
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
     Path(output_path).write_text(header + "\n".join(events) + "\n", encoding="utf-8")
+
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=65, log_message="Captions and subtitles generated successfully.")
+        except Exception:
+            pass
+
     return output_path
 
 

@@ -1,29 +1,71 @@
 from __future__ import annotations
 
-import json
+import argparse
 import os
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+import json
+import requests
 
-STATUS_PATH = Path(os.environ.get("JOB_STATUS_PATH", "data/current_job.json"))
+def update_status(job_id: str, status: str, posting_status: str = "", progress: int | None = None, log_message: str = "") -> None:
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+    if not supabase_url or not supabase_key:
+        print("Supabase credentials not set. Skipping status update.")
+        return
 
-
-def write_status(step: str, status: str = "in_progress", **extra: Any) -> dict[str, Any]:
-    STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, Any] = {
-        "step": step,
-        "status": status,
-        "updatedAt": datetime.now(timezone.utc).isoformat(),
-        "runId": os.environ.get("GITHUB_RUN_ID"),
-        "algorithmSignals": [
-            "watch-through rate",
-            "replay rate",
-            "DM shares",
-            "first-3-second retention",
-            "caption completeness",
-        ],
+    url = f"{supabase_url.rstrip('/')}/rest/v1/videos?id=eq.{job_id}"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
     }
-    payload.update({k: v for k, v in extra.items() if v is not None})
-    STATUS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return payload
+
+    # Fetch existing record to preserve and append data
+    existing = {}
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.ok and res.json():
+            existing = res.json()[0]
+    except Exception as exc:
+        print(f"Error fetching existing record: {exc}")
+
+    signals = existing.get("algorithm_signals") or {}
+    if not isinstance(signals, dict):
+        signals = {}
+
+    if progress is not None:
+        signals["progress"] = progress
+    if log_message:
+        logs = signals.get("logs") or []
+        logs.append(log_message)
+        signals["logs"] = logs
+
+    db_entry = {
+        "status": status,
+        "algorithm_signals": signals
+    }
+    if posting_status:
+        db_entry["posting_status"] = posting_status
+
+    try:
+        response = requests.patch(url, json=db_entry, headers=headers, timeout=15)
+        if response.ok:
+            print(f"Successfully updated job {job_id} to status={status}, posting_status={posting_status}")
+        else:
+            print(f"Failed to update Supabase: {response.text}")
+    except Exception as exc:
+        print(f"Error updating Supabase: {exc}")
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--status", required=True)
+    parser.add_argument("--posting-status", default="")
+    parser.add_argument("--progress", type=int)
+    parser.add_argument("--log", default="")
+    args = parser.parse_args()
+    
+    update_status(args.job_id, args.status, args.posting_status, args.progress, args.log)
+
+if __name__ == "__main__":
+    main()

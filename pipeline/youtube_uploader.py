@@ -70,9 +70,8 @@ def _make_instagram_export(script: dict[str, Any], video_path: str, thumbnail: s
     return str(export_dir), str(zip_path)
 
 
-def _library_entry(script: dict[str, Any], video_path: str, youtube_url: str | None, thumbnail: str, status: str, download_url: str, instagram_zip: str) -> dict[str, Any]:
+def _library_entry(script: dict[str, Any], video_path: str, youtube_url: str | None, thumbnail: str, status: str, download_url: str, instagram_zip: str, video_id: str) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    video_id = f"{now.strftime('%Y%m%d%H%M%S')}-{_safe_filename(script.get('topic', 'video'))}"
     return {
         "id": video_id,
         "title": script.get("youtube_title", "Untitled video"),
@@ -102,6 +101,33 @@ def _upsert_supabase(entry: dict[str, Any]) -> None:
     if not supabase_url or not supabase_key:
         print("Supabase credentials not set. Skipping Supabase write.")
         return
+
+    url_get = f"{supabase_url.rstrip('/')}/rest/v1/videos?id=eq.{entry['id']}"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json"
+    }
+
+    # Fetch existing to preserve progress logs
+    existing_signals = {}
+    try:
+        import requests
+        res = requests.get(url_get, headers=headers, timeout=10)
+        if res.ok and res.json():
+            existing_signals = res.json()[0].get("algorithm_signals") or {}
+    except Exception as exc:
+        print(f"Error fetching existing record signals: {exc}")
+
+    if not isinstance(existing_signals, dict):
+        existing_signals = {}
+
+    # Update progress and append final log
+    existing_signals["progress"] = 100
+    logs = existing_signals.get("logs") or []
+    logs.append("Video generation and uploading finished successfully.")
+    existing_signals["logs"] = logs
+
     db_entry = {
         "id": entry.get("id"),
         "title": entry.get("title"),
@@ -120,10 +146,10 @@ def _upsert_supabase(entry: dict[str, Any]) -> None:
         "posting_status": entry.get("postingStatus"),
         "status": entry.get("status"),
         "creative_score": entry.get("creativeScore"),
-        "algorithm_signals": entry.get("algorithmSignals"),
+        "algorithm_signals": existing_signals,
     }
-    url = f"{supabase_url.rstrip('/')}/rest/v1/videos"
-    headers = {
+    url_post = f"{supabase_url.rstrip('/')}/rest/v1/videos"
+    headers_post = {
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
@@ -132,17 +158,17 @@ def _upsert_supabase(entry: dict[str, Any]) -> None:
     try:
         import requests
         print(f"Upserting to Supabase table 'videos' (id={db_entry['id']})...")
-        response = requests.post(url, json=db_entry, headers=headers, timeout=15)
+        response = requests.post(url_post, json=db_entry, headers=headers_post, timeout=15)
         response.raise_for_status()
         print("Successfully upserted entry to Supabase.")
     except Exception as exc:
         print(f"Error upserting to Supabase: {exc}")
 
 
-def upload_to_youtube(script_path: str = "script.json", video_path: str = "final_video.mp4", library_path: str = "data/library.json") -> dict[str, Any]:
+def upload_to_youtube(script_path: str = "script.json", video_path: str = "final_video.mp4", library_path: str = "data/library.json", job_id: str = "") -> dict[str, Any]:
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     thumbnail = _extract_thumbnail(video_path)
-    provisional_id = os.environ.get("GITHUB_RUN_ID") or f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{_safe_filename(script.get('topic', 'video'))}"
+    provisional_id = job_id or os.environ.get("JOB_ID") or os.environ.get("GITHUB_RUN_ID") or f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{_safe_filename(script.get('topic', 'video'))}"
     _, instagram_zip = _make_instagram_export(script, video_path, thumbnail, provisional_id)
     download_url = os.environ.get("DOWNLOAD_URL") or f"https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'owner/repo')}/releases/download/{os.environ.get('RELEASE_TAG', 'latest')}/final_video.mp4"
     youtube_url: str | None = None
@@ -176,7 +202,7 @@ def upload_to_youtube(script_path: str = "script.json", video_path: str = "final
             status = "published"
         except Exception as exc:
             status = f"youtube-failed-release-confirmed: {exc}"
-    entry = _library_entry(script, video_path, youtube_url, thumbnail, status, download_url, instagram_zip)
+    entry = _library_entry(script, video_path, youtube_url, thumbnail, status, download_url, instagram_zip, provisional_id)
     _append_library(entry, library_path)
     _upsert_supabase(entry)
     Path("publish_result.json").write_text(json.dumps(entry, indent=2), encoding="utf-8")
@@ -188,8 +214,9 @@ def main() -> None:
     parser.add_argument("--script", default="script.json")
     parser.add_argument("--video", default="final_video.mp4")
     parser.add_argument("--library", default="data/library.json")
+    parser.add_argument("--job-id", default="")
     args = parser.parse_args()
-    print(json.dumps(upload_to_youtube(args.script, args.video, args.library), indent=2))
+    print(json.dumps(upload_to_youtube(args.script, args.video, args.library, args.job_id), indent=2))
 
 
 if __name__ == "__main__":

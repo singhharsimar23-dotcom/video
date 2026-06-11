@@ -40,6 +40,15 @@ def _audio_rms(path: str) -> float:
 
 
 def validate_video(script_path: str = "script.json", video_path: str = "final_video.mp4", output_path: str = "quality_report.json") -> dict[str, Any]:
+    import os
+    job_id = os.environ.get("JOB_ID")
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=80, log_message="Running automated quality checks...")
+        except Exception:
+            pass
+
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     expected_w, expected_h = (1080, 1920) if script.get("format") == "reels" else (1920, 1080)
     probe = _probe(video_path)
@@ -91,6 +100,14 @@ def validate_video(script_path: str = "script.json", video_path: str = "final_vi
     Path(output_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
     if critical_failures:
         raise RuntimeError("Critical quality validation failed: " + "; ".join(critical_failures))
+
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=90, log_message=f"Quality check passed with {len(warnings)} warnings.")
+        except Exception:
+            pass
+
     return report
 
 

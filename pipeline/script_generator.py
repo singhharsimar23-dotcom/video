@@ -200,11 +200,50 @@ def _normalize_candidates(raw: Any, format_name: str, style: str) -> list[dict[s
     return candidates
 
 
-def generate_script(topic: str, format_name: str, style: str, output_path: str = "script.json", candidates_path: str = "script_candidates.json", candidate_count: int = 5) -> dict[str, Any]:
+def generate_script(topic: str, format_name: str, style: str, output_path: str = "script.json", candidates_path: str = "script_candidates.json", candidate_count: int = 5, job_id: str = "") -> dict[str, Any]:
     if format_name not in {"reels", "longform"}:
         raise ValueError("format must be reels or longform")
     if style not in STYLE_PRESETS:
         style = "cinematic"
+
+    job_id = job_id or os.environ.get("JOB_ID")
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=5, log_message="Generating script...")
+        except Exception as exc:
+            print(f"Status report failed: {exc}")
+
+    # Check if a pre-approved script is stored in Supabase for this job
+    if job_id:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+        if supabase_url and supabase_key:
+            url = f"{supabase_url.rstrip('/')}/rest/v1/videos?id=eq.{job_id}"
+            headers = {
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}"
+            }
+            try:
+                import requests
+                res = requests.get(url, headers=headers, timeout=15)
+                if res.ok and res.json():
+                    existing = res.json()[0]
+                    signals = existing.get("algorithm_signals") or {}
+                    if isinstance(signals, dict) and "script" in signals:
+                        print(f"Found pre-approved script in Supabase for job_id {job_id}. Downloading...")
+                        approved_script = signals["script"]
+                        approved_script = _validate(approved_script, format_name, style)
+                        Path(output_path).write_text(json.dumps(approved_script, indent=2), encoding="utf-8")
+                        Path(candidates_path).write_text(json.dumps([approved_script], indent=2), encoding="utf-8")
+                        try:
+                            from pipeline.status import update_status
+                            update_status(job_id, "processing", progress=15, log_message="Downloaded pre-approved script from Supabase.")
+                        except Exception:
+                            pass
+                        return approved_script
+            except Exception as exc:
+                print(f"Error checking pre-approved script: {exc}")
     api_key = os.environ.get("GEMINI_API_KEY")
     candidates: list[dict[str, Any]] = []
     if api_key:
@@ -234,6 +273,12 @@ def generate_script(topic: str, format_name: str, style: str, output_path: str =
     selected["candidate_count"] = len(ranked)
     selected["selection_reason"] = selected.get("creative_score", {})
     Path(output_path).write_text(json.dumps(selected, indent=2), encoding="utf-8")
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=15, log_message="Script generated successfully.")
+        except Exception:
+            pass
     return selected
 
 
@@ -245,8 +290,9 @@ def main() -> None:
     parser.add_argument("--output", default="script.json")
     parser.add_argument("--candidates-output", default="script_candidates.json")
     parser.add_argument("--candidate-count", type=int, default=5)
+    parser.add_argument("--job-id", default="")
     args = parser.parse_args()
-    print(json.dumps(generate_script(args.topic, args.format, args.style, args.output, args.candidates_output, args.candidate_count), indent=2))
+    print(json.dumps(generate_script(args.topic, args.format, args.style, args.output, args.candidates_output, args.candidate_count, args.job_id), indent=2))
 
 
 if __name__ == "__main__":

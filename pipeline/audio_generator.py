@@ -72,12 +72,30 @@ def generate_audio(script_path: str = "script.json", voice_key: str = "female", 
     script = json.loads(script_file.read_text(encoding="utf-8"))
     voice = VOICES.get(voice_key, VOICES["female"])
     outputs: list[str] = []
+    job_id = os.environ.get("JOB_ID")
+
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=35, log_message="Generating voiceovers and fitting audio timing...")
+        except Exception:
+            pass
 
     async def _inner() -> None:
-        for scene in script["scenes"]:
+        scenes = script["scenes"]
+        for idx, scene in enumerate(scenes):
             scene_num = int(scene["scene_number"])
             output = Path(output_dir) / f"voice_scene_{scene_num:02d}.mp3"
             timing = Path(output_dir) / f"timing_scene_{scene_num:02d}.json"
+            
+            if job_id:
+                try:
+                    from pipeline.status import update_status
+                    progress_pct = 35 + int((idx / len(scenes)) * 20)
+                    update_status(job_id, "processing", progress=progress_pct, log_message=f"Synthesizing voiceover for scene {scene_num} / {len(scenes)}...")
+                except Exception:
+                    pass
+
             await _synthesize_with_timing(scene.get("voiceover", ""), voice, str(output), str(timing))
             audio_duration = _probe_duration(output)
             scene["audio_duration_seconds"] = round(audio_duration, 3)
@@ -87,6 +105,14 @@ def generate_audio(script_path: str = "script.json", voice_key: str = "female", 
     asyncio.run(_inner())
     destination = Path(timed_script_path or script_path)
     destination.write_text(json.dumps(script, indent=2), encoding="utf-8")
+
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=55, log_message="Voiceovers and audio timing complete.")
+        except Exception:
+            pass
+
     return outputs
 
 

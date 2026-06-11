@@ -26,6 +26,9 @@ on:
       benchmark:
         type: boolean
         default: false
+      job_id:
+        type: string
+        default: ''
   schedule:
     - cron: '0 14 * * *'
 
@@ -41,7 +44,10 @@ env:
   SCENE_START: ${{ github.event.inputs.scene_start || '' }}
   SCENE_END: ${{ github.event.inputs.scene_end || '' }}
   BENCHMARK: ${{ github.event.inputs.benchmark || 'false' }}
-  RELEASE_TAG: video-${{ github.run_id }}
+  JOB_ID: ${{ github.event.inputs.job_id || '' }}
+  RELEASE_TAG: video-${{ github.event.inputs.job_id || github.run_id }}
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
 jobs:
   generate:
@@ -194,3 +200,8 @@ jobs:
         with:
           commit_message: Update video library for run ${{ github.run_id }}
           file_pattern: data/library.json data/jobs/*.json
+
+      - name: Report failure to Supabase
+        if: ${{ failure() && env.JOB_ID != '' }}
+        run: |
+          python pipeline/status.py --job-id "$JOB_ID" --status "failed" --log "Workflow failed at an intermediate step. Please check GitHub Actions logs."

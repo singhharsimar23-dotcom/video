@@ -47,6 +47,15 @@ def _concat_inputs(scene_files: list[Path], durations: list[float], output: Path
 
 
 def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_path: str = "music/ambient.mp3", captions_path: str = "final_captions.ass", output_path: str = "final_video.mp4") -> str:
+    import os
+    job_id = os.environ.get("JOB_ID")
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=65, log_message="Assembling video segments and mixing audio...")
+        except Exception:
+            pass
+
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     work = Path(work_dir)
     w, h, fps = _dims(script.get("format", "reels"))
@@ -82,6 +91,14 @@ def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_
     passlog = str(work / "ffmpeg2pass")
     _run(["ffmpeg", "-y", "-i", str(loud), "-vcodec", "libx264", "-b:v", "8000k", "-pass", "1", "-passlogfile", passlog, "-an", "-f", "null", os.devnull])
     _run(["ffmpeg", "-y", "-i", str(loud), "-vcodec", "libx264", "-b:v", "8000k", "-pass", "2", "-passlogfile", passlog, "-acodec", "aac", "-b:a", "192k", output_path])
+
+    if job_id:
+        try:
+            from pipeline.status import update_status
+            update_status(job_id, "processing", progress=80, log_message="Video assembled and encoded successfully.")
+        except Exception:
+            pass
+
     return output_path
 
 

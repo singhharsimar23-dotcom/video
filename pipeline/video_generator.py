@@ -25,9 +25,17 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
     try:
         return Client(space_id, hf_token=hf_token)
     except Exception as exc:
-        LOGGER.warning("Waking sleeping Space %s after error: %s", space_id, exc)
+        exc_str = str(exc).lower()
+        if "404" in exc_str or "not found" in exc_str or "repository" in exc_str:
+            LOGGER.error("Space %s not found (404/Not Found). Bypassing wake sleep.", space_id)
+            raise
+        LOGGER.warning("Waking sleeping Space %s after error: %s. Sleeping 90s...", space_id, exc)
         time.sleep(90)
-        return Client(space_id, hf_token=hf_token)
+        try:
+            return Client(space_id, hf_token=hf_token)
+        except Exception as retry_exc:
+            LOGGER.error("Failed to wake space %s on retry: %s", space_id, retry_exc)
+            raise
 
 
 def _download_result(result: Any, output_path: Path) -> bool:
@@ -67,15 +75,18 @@ def _poll(job: Any, output_path: Path, api_name: str, timeout: int = 600) -> boo
     raise TimeoutError(f"Timed out waiting for {api_name}")
 
 
-def _submit_variants(client: Client, api_name: str, output_path: Path, variants: list[dict[str, Any]]) -> bool:
+def _submit_variants(client: Client, api_names: list[str] | str, output_path: Path, variants: list[dict[str, Any]]) -> bool:
+    if isinstance(api_names, str):
+        api_names = [api_names]
     last_error: Exception | None = None
-    for kwargs in variants:
-        try:
-            job = client.submit(api_name=api_name, **kwargs)
-            return _poll(job, output_path, api_name)
-        except Exception as exc:
-            last_error = exc
-            LOGGER.warning("Adapter call failed for %s with keys %s: %s", api_name, sorted(kwargs), exc)
+    for api_name in api_names:
+        for kwargs in variants:
+            try:
+                job = client.submit(api_name=api_name, **kwargs)
+                return _poll(job, output_path, api_name)
+            except Exception as exc:
+                last_error = exc
+                LOGGER.warning("Adapter call failed for %s with keys %s: %s", api_name, sorted(kwargs), exc)
     if last_error:
         raise last_error
     return False
@@ -83,7 +94,7 @@ def _submit_variants(client: Client, api_name: str, output_path: Path, variants:
 
 def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
     _, _, aspect_ratio, resolution = _dimensions(format_name)
-    client = _wake_client("Lightricks/LTX-Video", hf_token)
+    client = _wake_client("Lightricks/ltx-video-distilled", hf_token)
     base = {
         "prompt": scene["visual_prompt"],
         "negative_prompt": scene.get("negative_prompt", ""),
@@ -92,13 +103,13 @@ def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf
         "resolution": resolution,
         "camera_motion": scene.get("camera_motion", "static"),
     }
-    return _submit_variants(client, "/generate", output_path, [base, {k: v for k, v in base.items() if k != "camera_motion"}, {"prompt": base["prompt"]}])
+    return _submit_variants(client, ["/generate", "/predict", "/generate_video"], output_path, [base, {k: v for k, v in base.items() if k != "camera_motion"}, {"prompt": base["prompt"]}])
 
 
 def _generate_wan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
     _, _, aspect_ratio, resolution = _dimensions(format_name)
-    client = _wake_client("Wan-AI/Wan2.1-T2V-14B", hf_token)
-    return _submit_variants(client, "/generate_video", output_path, [
+    client = _wake_client("Wan-AI/Wan2.1", hf_token)
+    return _submit_variants(client, ["/generate_video", "/generate", "/predict"], output_path, [
         {"prompt": scene["visual_prompt"], "negative_prompt": scene.get("negative_prompt", ""), "aspect_ratio": aspect_ratio, "duration": int(scene.get("duration_seconds", 5))},
         {"prompt": scene["visual_prompt"], "resolution": resolution},
         {"prompt": scene["visual_prompt"]},
@@ -136,9 +147,8 @@ def _ken_burns(scene: dict[str, Any], format_name: str, output_path: Path, zoom_
 
 
 ADAPTERS: list[tuple[str, Callable[[dict[str, Any], str, Path, str | None], bool]]] = [
-    ("Lightricks/LTX-Video", _generate_ltx),
-    ("Wan-AI/Wan2.1-T2V-14B", _generate_wan),
-    ("tencent/HunyuanVideo", _generate_hunyuan),
+    ("Lightricks/ltx-video-distilled", _generate_ltx),
+    ("Wan-AI/Wan2.1", _generate_wan),
 ]
 
 
@@ -152,9 +162,20 @@ def _write_manifest(manifest_path: Path, script: dict[str, Any], completed: list
     }, indent=2), encoding="utf-8")
 
 
+def _report_status(job_id: str | None, status: str, progress: int, log_message: str) -> None:
+    if not job_id:
+        return
+    try:
+        from pipeline.status import update_status
+        update_status(job_id, status, progress=progress, log_message=log_message)
+    except Exception as exc:
+        LOGGER.warning("Status report failed for job %s: %s", job_id, exc)
+
+
 def generate_videos(script_path: str = "script.json", output_dir: str = ".", scene_start: int | None = None, scene_end: int | None = None, manifest_path: str | None = None) -> list[str]:
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     hf_token = os.environ.get("HF_TOKEN")
+    job_id = os.environ.get("JOB_ID")
     outputs: list[str] = []
     completed: list[int] = []
     scenes = script["scenes"]
@@ -162,11 +183,18 @@ def generate_videos(script_path: str = "script.json", output_dir: str = ".", sce
         scenes = [s for s in scenes if int(s["scene_number"]) >= scene_start]
     if scene_end is not None:
         scenes = [s for s in scenes if int(s["scene_number"]) <= scene_end]
-    for scene in scenes:
+    
+    _report_status(job_id, "processing", 15, f"Starting video clip generation for {len(scenes)} scenes...")
+    
+    for idx, scene in enumerate(scenes):
         scene_num = int(scene["scene_number"])
         out = Path(output_dir) / f"raw_scene_{scene_num:02d}.mp4"
         generated = False
         errors: list[str] = []
+        
+        progress_pct = 15 + int((idx / len(scenes)) * 20)
+        _report_status(job_id, "processing", progress_pct, f"Generating scene {scene_num} / {len(scenes)}...")
+        
         for name, adapter in ADAPTERS:
             started = time.time()
             try:
@@ -174,17 +202,21 @@ def generate_videos(script_path: str = "script.json", output_dir: str = ".", sce
                 if adapter(scene, script["format"], out, hf_token):
                     LOGGER.info("Generated scene %s with %s in %.1fs", scene_num, name, time.time() - started)
                     generated = True
+                    _report_status(job_id, "processing", progress_pct + int(20 / len(scenes)), f"Scene {scene_num} generated with {name}.")
                     break
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
         if not generated:
             LOGGER.warning("All video adapters failed for scene %s; using Ken Burns fallback: %s", scene_num, " | ".join(errors))
+            _report_status(job_id, "processing", progress_pct + int(20 / len(scenes)), f"Scene {scene_num} video adapters failed, using Ken Burns fallback.")
             _ken_burns(scene, script["format"], out, zoom_in=scene_num % 2 == 1, hf_token=hf_token)
         outputs.append(str(out))
         completed.append(scene_num)
         if manifest_path:
             _write_manifest(Path(manifest_path), script, completed)
         time.sleep(8)
+    
+    _report_status(job_id, "processing", 35, "Video clip generation finished.")
     return outputs
 
 

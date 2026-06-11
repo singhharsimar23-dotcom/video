@@ -33,11 +33,19 @@ export async function triggerWorkflow(inputs: WorkflowInputs) {
   throw new Error(`For security, this static GitHub Pages dashboard never exposes a workflow-write token. Open GitHub Actions to run with these inputs: ${url}`);
 }
 
-export async function getLatestRun(): Promise<RunStatus> {
+export async function getLatestRun(runId?: number | string, jobId?: string): Promise<RunStatus> {
   assertRepo();
-  const response = await fetch(`/api/status/`, { cache: 'no-store' });
+  const params = new URLSearchParams();
+  if (runId) params.append('runId', runId.toString());
+  if (jobId) params.append('jobId', jobId);
+  const url = `/api/status/${params.toString() ? '?' + params.toString() : ''}`;
+  
+  const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) throw new Error(`Could not load latest run: ${response.status}`);
   const data = await response.json();
+  if (data && typeof data.rawStatus === 'string') {
+    return data;
+  }
   const run = data.workflow_runs?.[0];
   if (!run) return { rawStatus: 'idle', label: 'Ready', progress: 0 };
   const latestLibrary = await getLibrary();
@@ -80,17 +88,17 @@ export async function getCurrentJob() {
   return response.json();
 }
 
-export function pollRunStatus(runId: number | undefined, onStatus: (status: RunStatus) => void) {
+export function pollRunStatus(runId: number | string | undefined, jobId: string | undefined, onStatus: (status: RunStatus) => void) {
   let stopped = false;
   async function tick() {
     if (stopped) return;
     try {
-      const status = await getLatestRun();
+      const status = await getLatestRun(runId, jobId);
       onStatus(status);
     } catch (error) {
       onStatus({ rawStatus: 'error', label: error instanceof Error ? error.message : 'Polling failed', progress: 0 });
     } finally {
-      if (!stopped) window.setTimeout(tick, 8000);
+      if (!stopped) window.setTimeout(tick, 5000);
     }
   }
   tick();

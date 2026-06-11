@@ -15,7 +15,11 @@ export default function GeneratePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => pollRunStatus(status.id, setStatus), [status.id]);
+  useEffect(() => {
+    const jobId = typeof status.id === 'string' ? status.id : undefined;
+    const runId = typeof status.id === 'number' ? status.id : undefined;
+    return pollRunStatus(runId, jobId, setStatus);
+  }, [status.id]);
 
   async function submit() {
     setBusy(true);
@@ -40,7 +44,12 @@ export default function GeneratePage() {
         }
       } else if (data.success) {
         setError('Generation pipeline triggered successfully in the background! Polling status...');
-        window.setTimeout(async () => setStatus(await getLatestRun()), 3000);
+        setStatus({
+          id: data.jobId,
+          rawStatus: 'queued',
+          label: 'Queued',
+          progress: 0
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not trigger workflow');
