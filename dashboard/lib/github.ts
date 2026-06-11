@@ -45,6 +45,7 @@ export async function getLatestRun(): Promise<RunStatus> {
   if (run.status === 'completed' && run.conclusion === 'success' && latestLibrary[0]) {
     status.thumbnailUrl = latestLibrary[0].thumbnailUrl;
     status.youtubeUrl = latestLibrary[0].youtubeUrl;
+    status.downloadUrl = latestLibrary[0].downloadUrl;
   }
   return status;
 }

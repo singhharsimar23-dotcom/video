@@ -44,4 +44,5 @@ export interface RunStatus {
   htmlUrl?: string;
   thumbnailUrl?: string;
   youtubeUrl?: string | null;
+  downloadUrl?: string;
 }
