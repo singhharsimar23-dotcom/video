@@ -14,6 +14,8 @@ import requests
 from gradio_client import Client
 
 LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
 FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
 # HuggingFace Inference API endpoint – stable, no space wake-up required
 HF_INFERENCE_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
@@ -35,7 +37,7 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
         if "404" in exc_str or "not found" in exc_str or "repository" in exc_str:
             LOGGER.error("Space %s not found (404/Not Found). Bypassing wake sleep.", space_id)
             raise
-        
+
         # Check if the space is actually sleeping/building/paused
         try:
             from huggingface_hub import space_info
@@ -50,7 +52,7 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
                 LOGGER.error("Space %s not found via Hub check: %s. Raising immediately.", space_id, hub_exc)
                 raise
             LOGGER.warning("Could not check space status via huggingface_hub: %s", hub_exc)
-            
+
         LOGGER.warning("Waking sleeping/building Space %s after error: %s. Sleeping 90s...", space_id, exc)
         time.sleep(90)
         try:
@@ -60,31 +62,73 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
             raise
 
 
+def _extract_file_from_result(item: Any) -> str | None:
+    """
+    Gradio >=3.40 returns files/images/videos as dicts like:
+      {"path": "/tmp/gradio/abc.mp4", "url": "http://...", ...}   (video)
+      {"path": "/tmp/gradio/abc.webp", "url": "http://...", ...}  (image)
+    This helper extracts the usable path or URL from such objects.
+    """
+    if isinstance(item, dict):
+        # Video dict: {"video": "<path>", "subtitles": ...}
+        if "video" in item:
+            return item["video"]
+        # File/image dict: {"path": ..., "url": ...}
+        if "path" in item and item["path"]:
+            return item["path"]
+        if "url" in item and item["url"]:
+            return item["url"]
+    return None
+
+
 def _download_result(result: Any, output_path: Path) -> bool:
+    """
+    Walk the result tree (list/tuple/dict) and download the first usable
+    file reference (local path or http URL) to output_path.
+    Handles Gradio's new dict-based file returns for images and videos.
+    """
     candidates: list[Any] = []
-    if isinstance(result, dict):
-        candidates.extend(result.values())
-    elif isinstance(result, (list, tuple)):
+    if isinstance(result, (list, tuple)):
         candidates.extend(result)
     else:
         candidates.append(result)
+
     while candidates:
         item = candidates.pop(0)
+
+        # Handle Gradio file/image/video dicts
+        file_ref = _extract_file_from_result(item)
+        if file_ref:
+            if str(file_ref).startswith("http"):
+                resp = requests.get(file_ref, timeout=180)
+                resp.raise_for_status()
+                output_path.write_bytes(resp.content)
+                return output_path.stat().st_size > 0
+            p = Path(str(file_ref))
+            if p.exists() and p.stat().st_size > 0:
+                shutil.copyfile(p, output_path)
+                return output_path.stat().st_size > 0
+            continue
+
         if isinstance(item, dict):
+            # Recurse into unknown dicts
             candidates.extend(item.values())
             continue
         if isinstance(item, (list, tuple)):
             candidates.extend(item)
             continue
+
         value = str(item)
         if value.startswith("http"):
-            resp = requests.get(value, timeout=120)
+            resp = requests.get(value, timeout=180)
             resp.raise_for_status()
             output_path.write_bytes(resp.content)
             return output_path.stat().st_size > 0
-        if Path(value).exists():
-            shutil.copyfile(value, output_path)
+        p = Path(value)
+        if p.exists() and p.stat().st_size > 0:
+            shutil.copyfile(p, output_path)
             return output_path.stat().st_size > 0
+
     return output_path.exists() and output_path.stat().st_size > 0
 
 
@@ -115,13 +159,27 @@ def _submit_variants(client: Client, api_names: list[str] | str, output_path: Pa
 
 
 def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
+    """
+    Uses Lightricks/ltx-video-distilled.
+    Live API (verified 2026-06-11 via view_api()):
+      api_name="/text_to_video"
+      params: prompt, negative_prompt, input_image_filepath(None), input_video_filepath(None),
+              height_ui, width_ui, mode, duration_ui, ui_frames_to_use, seed_ui,
+              randomize_seed, ui_guidance_scale, improve_texture_flag
+    Returns: dict(video: filepath, subtitles: filepath|None), seed
+    NOTE: dimensions must be multiples of 32 and in range [256, 1280].
+    NOTE: duration_ui max is ~8s on the free space.
+    """
     _, _, _, resolution = _dimensions(format_name)
     width_val, height_val = map(int, resolution.split("x"))
+    # Clamp to valid range (256-1280, multiples of 32)
+    width_val = max(256, min(1280, (width_val // 32) * 32))
+    height_val = max(256, min(1280, (height_val // 32) * 32))
+
     client = _wake_client("Lightricks/ltx-video-distilled", hf_token)
-    duration = int(scene.get("duration_seconds", 5))
-    # ui_frames_to_use is usually 8 frames per second + 1
-    frames = duration * 8 + 1
-    
+    duration = min(int(scene.get("duration_seconds", 5)), 8)  # space caps at ~8s
+    frames = duration * 8 + 1  # ~8fps + 1
+
     base = {
         "prompt": scene["visual_prompt"],
         "negative_prompt": scene.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted"),
@@ -132,7 +190,7 @@ def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf
         "mode": "text-to-video",
         "duration_ui": float(duration),
         "ui_frames_to_use": float(frames),
-        "seed_ui": 42.0,
+        "seed_ui": 42,
         "randomize_seed": True,
         "ui_guidance_scale": 3.0,
         "improve_texture_flag": True,
@@ -141,36 +199,49 @@ def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf
 
 
 def _generate_wan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
+    """
+    Uses multimodalart/wan2-1-fast (image-to-video).
+    Live API (verified 2026-06-11 via view_api()):
+      api_name="/generate_video"
+      params: input_image (dict with 'path' key), prompt, height, width,
+              negative_prompt, duration_seconds, guidance_scale, steps, seed, randomize_seed
+    Returns: dict(video: filepath, subtitles: filepath|None), seed
+    NOTE: input_image must be a Gradio image dict {"path": str}, not a raw string.
+    NOTE: height/width must be multiples of 32, max 896.
+    """
     # 1. Generate starting frame image using FLUX first
     temp_image = output_path.with_suffix(".png")
     if not _try_flux_image(scene["visual_prompt"], temp_image, hf_token):
         LOGGER.warning("FLUX image generation failed for Wan input image.")
         return False
-        
+
     # 2. Call image-to-video on Wan Space
     client = _wake_client("multimodalart/wan2-1-fast", hf_token)
     if format_name == "reels":
-        width, height = 480, 864  # Multiple of 32
+        width, height = 480, 864  # Multiple of 32, max 896
     else:
-        width, height = 864, 480  # Multiple of 32
-        
-    duration = int(scene.get("duration_seconds", 5))
-    
+        width, height = 864, 480  # Multiple of 32, max 896
+
+    duration = min(int(scene.get("duration_seconds", 5)), 8)
+
+    # Gradio Image component requires dict with "path" key, NOT a raw string
+    input_image_dict = {"path": str(temp_image)}
+
     base = {
-        "input_image": str(temp_image),
+        "input_image": input_image_dict,
         "prompt": scene["visual_prompt"],
         "height": float(height),
         "width": float(width),
-        "negative_prompt": "Bright tones, overexposed, static, blurred details, subtitles, watermark, text, signature",
+        "negative_prompt": "Bright tones, overexposed, static, blurred details, subtitles, watermark, text, signature, worst quality, low quality",
         "duration_seconds": float(duration),
-        "guidance_scale": 6.0,
-        "steps": 4.0,  # Wan fast uses 4 steps
+        "guidance_scale": 1.0,  # Wan fast works best at 1.0 (default)
+        "steps": 4.0,
         "seed": 42.0,
         "randomize_seed": True,
     }
-    
+
     success = _submit_variants(client, ["/generate_video"], output_path, [base])
-    
+
     # Clean up temp image
     if temp_image.exists():
         try:
@@ -180,17 +251,16 @@ def _generate_wan(scene: dict[str, Any], format_name: str, output_path: Path, hf
     return success
 
 
-def _generate_hunyuan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
-    _, _, aspect_ratio, _ = _dimensions(format_name)
-    client = _wake_client("tencent/HunyuanVideo", hf_token)
-    return _submit_variants(client, "/predict", output_path, [
-        {"prompt": scene["visual_prompt"], "negative_prompt": scene.get("negative_prompt", ""), "aspect_ratio": aspect_ratio},
-        {"prompt": scene["visual_prompt"]},
-    ])
-
-
 def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bool:
-    """Generate an image using the HF Inference API (primary) then fall back to Gradio spaces."""
+    """
+    Generate an image using the HF Inference API (primary) then fall back to Gradio spaces.
+
+    Primary: HF Inference REST API (stable, no space wake-up, rate-limited by token tier).
+    Fallback: FLUX.1-schnell Gradio space.
+      Live API (verified 2026-06-11):  api_name="/infer"
+      params: prompt, seed, randomize_seed, width, height, num_inference_steps
+      Returns: dict(path, url, ...) — must use _extract_file_from_result
+    """
     # --- Primary: HF Inference API (no space wake-up, always available) ---
     if hf_token:
         for api_url in [HF_INFERENCE_URL, HF_SDXL_URL]:
@@ -211,35 +281,32 @@ def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bo
                         if output_image.stat().st_size > 0:
                             return True
                 else:
-                    LOGGER.warning("HF Inference API (%s) returned %s.", api_url, resp.status_code)
+                    LOGGER.warning("HF Inference API (%s) returned HTTP %s: %s", api_url, resp.status_code, resp.text[:200])
             except Exception as exc:
                 LOGGER.warning("HF Inference API call failed (%s): %s", api_url, exc)
 
-    # --- Fallback: Gradio Spaces (when no token or Inference API fails) ---
-    spaces = [
-        FLUX_SPACE,
-        "mukaist/FLUX.1-schnell",
-    ]
-    for space in spaces:
-        try:
-            client = _wake_client(space, hf_token)
-            variants = [
-                {
-                    "prompt": prompt,
-                    "width": 512.0,
-                    "height": 512.0,
-                    "num_inference_steps": 4.0,
-                    "seed": 0.0,
-                    "randomize_seed": True
-                },
-                {
-                    "prompt": prompt
-                }
-            ]
-            if _submit_variants(client, ["/infer", "/predict"], output_image, variants):
-                return True
-        except Exception as exc:
-            LOGGER.warning("FLUX Gradio space fallback failed for %s: %s", space, exc)
+    # --- Fallback: FLUX.1-schnell Gradio Space ---
+    # Only one endpoint: /infer  (NOT /predict — verified live)
+    try:
+        client = _wake_client(FLUX_SPACE, hf_token)
+        variants = [
+            {
+                "prompt": prompt,
+                "seed": 0.0,
+                "randomize_seed": True,
+                "width": 512.0,
+                "height": 512.0,
+                "num_inference_steps": 4.0,
+            },
+            {
+                "prompt": prompt,
+            },
+        ]
+        if _submit_variants(client, ["/infer"], output_image, variants):
+            return True
+    except Exception as exc:
+        LOGGER.warning("FLUX Gradio space fallback failed: %s", exc)
+
     return False
 
 
@@ -292,18 +359,18 @@ def generate_videos(script_path: str = "script.json", output_dir: str = ".", sce
         scenes = [s for s in scenes if int(s["scene_number"]) >= scene_start]
     if scene_end is not None:
         scenes = [s for s in scenes if int(s["scene_number"]) <= scene_end]
-    
+
     _report_status(job_id, "processing", 15, f"Starting video clip generation for {len(scenes)} scenes...")
-    
+
     for idx, scene in enumerate(scenes):
         scene_num = int(scene["scene_number"])
         out = Path(output_dir) / f"raw_scene_{scene_num:02d}.mp4"
         generated = False
         errors: list[str] = []
-        
+
         progress_pct = 15 + int((idx / len(scenes)) * 20)
         _report_status(job_id, "processing", progress_pct, f"Generating scene {scene_num} / {len(scenes)}...")
-        
+
         for name, adapter in ADAPTERS:
             started = time.time()
             try:
@@ -324,7 +391,7 @@ def generate_videos(script_path: str = "script.json", output_dir: str = ".", sce
         if manifest_path:
             _write_manifest(Path(manifest_path), script, completed)
         time.sleep(8)
-    
+
     _report_status(job_id, "processing", 35, "Video clip generation finished.")
     return outputs
 
