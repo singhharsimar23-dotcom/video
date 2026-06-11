@@ -1,0 +1,195 @@
+name: Generate Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        type: string
+        default: ''
+      format:
+        type: choice
+        options: [reels, longform]
+        default: reels
+      style:
+        type: string
+        default: cinematic
+      voice:
+        type: choice
+        options: [male, female]
+        default: female
+      scene_start:
+        type: string
+        default: ''
+      scene_end:
+        type: string
+        default: ''
+      benchmark:
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 14 * * *'
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  VIDEO_TOPIC: ${{ github.event.inputs.topic || '' }}
+  VIDEO_FORMAT: ${{ github.event.inputs.format || 'reels' }}
+  VIDEO_STYLE: ${{ github.event.inputs.style || 'cinematic' }}
+  VIDEO_VOICE: ${{ github.event.inputs.voice || 'female' }}
+  SCENE_START: ${{ github.event.inputs.scene_start || '' }}
+  SCENE_END: ${{ github.event.inputs.scene_end || '' }}
+  BENCHMARK: ${{ github.event.inputs.benchmark || 'false' }}
+  RELEASE_TAG: video-${{ github.run_id }}
+
+timeout-minutes: 120
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libass-dev fonts-dejavu
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+
+      - name: Benchmark creative system
+        if: ${{ env.BENCHMARK == 'true' }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python pipeline/benchmark.py --format "$VIDEO_FORMAT" --style "$VIDEO_STYLE" --output data/benchmarks.json
+
+      - name: Commit benchmark results
+        if: ${{ env.BENCHMARK == 'true' }}
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Update creative benchmark results for run ${{ github.run_id }}
+          file_pattern: data/benchmarks.json
+
+      - name: Scripting
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python pipeline/script_generator.py --topic "$VIDEO_TOPIC" --format "$VIDEO_FORMAT" --style "$VIDEO_STYLE" --output script.json --candidates-output script_candidates.json --candidate-count 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: script
+          path: |
+            script.json
+            script_candidates.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: script
+          path: .
+
+      - name: Generating clips
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python pipeline/video_generator.py --script script.json --output-dir . --scene-start "${SCENE_START:-1}" --scene-end "${SCENE_END:-999}" --manifest data/jobs/${{ github.run_id }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw-scenes
+          path: raw_scene_*.mp4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: raw-scenes
+          path: .
+
+      - name: Generating audio
+        run: python pipeline/audio_generator.py --script script.json --voice "$VIDEO_VOICE" --output-dir . --timed-script script.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-and-timing
+          path: |
+            voice_scene_*.mp3
+            timing_scene_*.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice-and-timing
+          path: .
+
+      - name: Adding captions
+        run: python pipeline/caption_generator.py --script script.json --timing-dir . --output final_captions.ass
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captions
+          path: final_captions.ass
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: captions
+          path: .
+
+      - name: Assembling
+        run: python pipeline/video_assembler.py --script script.json --work-dir . --music music/ambient.mp3 --captions final_captions.ass --output final_video.mp4
+
+      - name: Quality validation
+        run: python pipeline/quality_validator.py --script script.json --video final_video.mp4 --output quality_report.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-video
+          path: |
+            final_video.mp4
+            quality_report.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: final-video
+          path: .
+
+      - name: Upload final video to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Generated video ${{ github.run_id }}
+          files: |
+            final_video.mp4
+            quality_report.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Uploading
+        env:
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/final_video.mp4
+          INSTAGRAM_EXPORT_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/${{ github.run_id }}_instagram_export.zip
+        run: python pipeline/youtube_uploader.py --script script.json --video final_video.mp4 --library data/library.json
+
+      - name: Upload Instagram export package
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: "*_instagram_export.zip"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit library update
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Update video library for run ${{ github.run_id }}
+          file_pattern: data/library.json data/jobs/*.json
