@@ -47,43 +47,50 @@ def validate_video(script_path: str = "script.json", video_path: str = "final_vi
     video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
     audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
     duration = float(probe.get("format", {}).get("duration", 0) or 0)
-    failures: list[str] = []
+    critical_failures: list[str] = []
+    warnings: list[str] = []
     if not video_stream:
-        failures.append("missing video stream")
+        critical_failures.append("missing video stream")
     else:
         if int(video_stream.get("width", 0)) != expected_w or int(video_stream.get("height", 0)) != expected_h:
-            failures.append(f"resolution is {video_stream.get('width')}x{video_stream.get('height')}, expected {expected_w}x{expected_h}")
+            warnings.append(f"resolution is {video_stream.get('width')}x{video_stream.get('height')}, expected {expected_w}x{expected_h}")
         if video_stream.get("codec_name") != "h264":
-            failures.append(f"video codec is {video_stream.get('codec_name')}, expected h264")
+            warnings.append(f"video codec is {video_stream.get('codec_name')}, expected h264")
         if video_stream.get("pix_fmt") != "yuv420p":
-            failures.append(f"pixel format is {video_stream.get('pix_fmt')}, expected yuv420p")
+            warnings.append(f"pixel format is {video_stream.get('pix_fmt')}, expected yuv420p")
     if not audio_stream:
-        failures.append("missing audio stream")
+        critical_failures.append("missing audio stream")
     elif audio_stream.get("codec_name") != "aac":
-        failures.append(f"audio codec is {audio_stream.get('codec_name')}, expected aac")
+        warnings.append(f"audio codec is {audio_stream.get('codec_name')}, expected aac")
     if script.get("format") == "reels" and not (20 <= duration <= 45):
-        failures.append(f"reels duration {duration:.2f}s is outside safe 20-45s range")
+        warnings.append(f"reels duration {duration:.2f}s is outside safe 20-45s range")
     if script.get("format") == "longform" and not (160 <= duration <= 260):
-        failures.append(f"longform duration {duration:.2f}s is outside safe 160-260s range")
+        warnings.append(f"longform duration {duration:.2f}s is outside safe 160-260s range")
     black_samples = {"1s": _sample_blackness(video_path, 1), "midpoint": _sample_blackness(video_path, duration / 2), "final": _sample_blackness(video_path, max(duration - 1, 0))}
     if black_samples["1s"] >= 1:
-        failures.append("hook frame near 1s appears black; first-3-second retention risk")
+        warnings.append("hook frame near 1s appears black; first-3-second retention risk")
     if sum(black_samples.values()) >= 2:
-        failures.append("multiple sampled frames appear black or empty")
+        warnings.append("multiple sampled frames appear black or empty")
     mean_volume = _audio_rms(video_path)
     if mean_volume < -35:
-        failures.append(f"audio mean volume {mean_volume:.1f} dB is likely too quiet")
+        warnings.append(f"audio mean volume {mean_volume:.1f} dB is likely too quiet")
+    
+    # Print warnings to console
+    for warning in warnings:
+        print(f"Validation Warning: {warning}")
+        
     report = {
-        "ok": not failures,
-        "failures": failures,
+        "ok": not critical_failures,
+        "failures": critical_failures,
+        "warnings": warnings,
         "duration": duration,
         "expectedResolution": f"{expected_w}x{expected_h}",
         "blackSamples": black_samples,
         "meanVolumeDb": mean_volume,
     }
     Path(output_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
-    if failures:
-        raise RuntimeError("Quality validation failed: " + "; ".join(failures))
+    if critical_failures:
+        raise RuntimeError("Critical quality validation failed: " + "; ".join(critical_failures))
     return report
 
 

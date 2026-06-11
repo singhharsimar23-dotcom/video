@@ -1,11 +1,11 @@
 name: Deploy Dashboard
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'dashboard/**'
-      - '.github/workflows/deploy_dashboard.yml'
+#  push:
+#    branches: [main]
+#    paths:
+#      - 'dashboard/**'
+#      - '.github/workflows/deploy_dashboard.yml'
   workflow_dispatch:
 
 permissions:

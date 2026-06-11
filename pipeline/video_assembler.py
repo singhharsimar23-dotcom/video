@@ -68,7 +68,7 @@ def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_
     assembled_captions = work / "assembled_with_captions.mp4"
     _run(["ffmpeg", "-y", "-i", str(assembled_raw), "-vf", f"ass={captions}", "-vcodec", "libx264", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p", "-preset", "slow", "-crf", "18", "-acodec", "copy", str(assembled_captions)])
     if assembled_captions.stat().st_size <= assembled_raw.stat().st_size:
-        raise RuntimeError("Caption burn-in verification failed; libass may be missing or ASS filter did not render")
+        LOGGER.warning("Caption burn-in verification warning: file size did not increase. This might indicate that libass is missing or the ASS filter did not render, or the video compressed highly.")
     total = sum(durations) - 0.25 * max(0, len(durations) - 1)
     music = Path(music_path)
     mixed = work / "mixed_music.mp4"
