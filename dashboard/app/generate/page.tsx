@@ -21,10 +21,27 @@ export default function GeneratePage() {
     setBusy(true);
     setError(null);
     try {
-      const url = getWorkflowDispatchUrl(inputs);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      setError('Secure trigger opened in GitHub Actions. This dashboard never ships a write-capable token to the browser.');
-      window.setTimeout(async () => setStatus(await getLatestRun()), 2000);
+      const response = await fetch('/api/trigger/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inputs),
+      });
+      if (!response.ok) {
+        throw new Error(`Server returned error status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data.error) {
+        if (data.fallback) {
+          const url = getWorkflowDispatchUrl(inputs);
+          window.open(url, '_blank', 'noopener,noreferrer');
+          setError('Vercel server is not configured with a GITHUB_TOKEN. Opened manual trigger page on GitHub.');
+        } else {
+          setError(data.error);
+        }
+      } else if (data.success) {
+        setError('Generation pipeline triggered successfully in the background! Polling status...');
+        window.setTimeout(async () => setStatus(await getLatestRun()), 3000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not trigger workflow');
     } finally {
