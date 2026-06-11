@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -61,7 +62,7 @@ def generate_audio(script_path: str = "script.json", voice_key: str = "female", 
     script = json.loads(script_file.read_text(encoding="utf-8"))
     voice = VOICES.get(voice_key, VOICES["female"])
     outputs: list[str] = []
-    job_id = os.environ.get("JOB_ID")
+    job_id = os.environ.get("JOB_ID")  # os is now imported at module level
 
     if job_id:
         try:

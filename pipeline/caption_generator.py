@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
@@ -20,7 +21,6 @@ def _style(format_name: str) -> tuple[int, int, int, int]:
 
 
 def generate_captions(script_path: str = "script.json", timing_dir: str = ".", output_path: str = "final_captions.ass") -> str:
-    import os
     job_id = os.environ.get("JOB_ID")
     if job_id:
         try:

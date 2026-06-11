@@ -47,7 +47,6 @@ def _concat_inputs(scene_files: list[Path], durations: list[float], output: Path
 
 
 def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_path: str = "music/ambient.mp3", captions_path: str = "final_captions.ass", output_path: str = "final_video.mp4") -> str:
-    import os
     job_id = os.environ.get("JOB_ID")
     if job_id:
         try:

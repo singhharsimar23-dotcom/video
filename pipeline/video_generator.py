@@ -15,6 +15,10 @@ from gradio_client import Client
 
 LOGGER = logging.getLogger(__name__)
 FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
+# HuggingFace Inference API endpoint – stable, no space wake-up required
+HF_INFERENCE_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+# Secondary model if FLUX quota is hit
+HF_SDXL_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
 
 
 def _dimensions(format_name: str) -> tuple[int, int, str, str]:
@@ -186,10 +190,35 @@ def _generate_hunyuan(scene: dict[str, Any], format_name: str, output_path: Path
 
 
 def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bool:
+    """Generate an image using the HF Inference API (primary) then fall back to Gradio spaces."""
+    # --- Primary: HF Inference API (no space wake-up, always available) ---
+    if hf_token:
+        for api_url in [HF_INFERENCE_URL, HF_SDXL_URL]:
+            try:
+                headers = {"Authorization": f"Bearer {hf_token}"}
+                resp = requests.post(api_url, headers=headers, json={"inputs": prompt}, timeout=120)
+                if resp.status_code == 200 and resp.content:
+                    output_image.write_bytes(resp.content)
+                    if output_image.stat().st_size > 0:
+                        LOGGER.info("FLUX image generated via HF Inference API (%s).", api_url)
+                        return True
+                elif resp.status_code == 503:
+                    LOGGER.warning("HF Inference API model loading (%s), retrying in 30s...", api_url)
+                    time.sleep(30)
+                    resp2 = requests.post(api_url, headers=headers, json={"inputs": prompt}, timeout=120)
+                    if resp2.status_code == 200 and resp2.content:
+                        output_image.write_bytes(resp2.content)
+                        if output_image.stat().st_size > 0:
+                            return True
+                else:
+                    LOGGER.warning("HF Inference API (%s) returned %s.", api_url, resp.status_code)
+            except Exception as exc:
+                LOGGER.warning("HF Inference API call failed (%s): %s", api_url, exc)
+
+    # --- Fallback: Gradio Spaces (when no token or Inference API fails) ---
     spaces = [
         FLUX_SPACE,
-        "ap123/Flux.1-Schnell",
-        "mukaist/FLUX.1-schnell"
+        "mukaist/FLUX.1-schnell",
     ]
     for space in spaces:
         try:
@@ -210,7 +239,7 @@ def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bo
             if _submit_variants(client, ["/infer", "/predict"], output_image, variants):
                 return True
         except Exception as exc:
-            LOGGER.warning("FLUX image fallback failed for space %s: %s", space, exc)
+            LOGGER.warning("FLUX Gradio space fallback failed for %s: %s", space, exc)
     return False
 
 

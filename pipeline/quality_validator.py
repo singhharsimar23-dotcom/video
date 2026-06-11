@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,6 @@ def _audio_rms(path: str) -> float:
 
 
 def validate_video(script_path: str = "script.json", video_path: str = "final_video.mp4", output_path: str = "quality_report.json") -> dict[str, Any]:
-    import os
     job_id = os.environ.get("JOB_ID")
     if job_id:
         try:
