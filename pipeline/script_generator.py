@@ -12,14 +12,14 @@ from typing import Any
 import google.generativeai as genai
 
 STYLE_PRESETS = {
-    "cinematic": "anamorphic lens, shallow DOF, film grain, moody cinematic, teal-orange color grade",
-    "documentary": "handheld, natural light, desaturated realism, 16mm grain, observational",
-    "dreamy": "soft bokeh, pastel grade, ethereal haze, slow motion, golden hour",
-    "brutalist": "harsh contrast, monochromatic, stark geometry, harsh industrial lighting",
-    "neon": "cyberpunk neon-lit, rain-soaked, blue-pink grade, volumetric fog",
-    "golden_hour": "warm amber tones, long shadows, soft rim light, cinematic warmth",
+    "cinematic": "shot on ARRI Alexa LF, anamorphic lens, shallow depth of field, subtle film grain, moody cinematic lighting, professional teal-orange color grade, high-end commercial style, photorealistic textures",
+    "documentary": "shot on RED V-Raptor, handheld documentary style, natural diffuse light, desaturated realism, 16mm film grain, observational raw footage, high-fidelity skin textures",
+    "dreamy": "soft bokeh, pastel color grading, ethereal volumetric haze, slow-motion rendering, golden hour sunlight, soft rim lighting, magical realism",
+    "brutalist": "stark contrast, monochromatic, raw concrete architecture, stark geometric shadows, harsh industrial halogen lighting, grainy CCTV/security camera style",
+    "neon": "cyberpunk aesthetic, neon-lit rainy streets, wet asphalt reflections, blue-pink color grade, volumetric fog, high contrast, cinematic octane render quality",
+    "golden_hour": "warm amber sun rays, long casting shadows, soft golden rim lighting, cinematic warmth, shot on 35mm lens, dust motes floating in air",
 }
-NEGATIVE_PROMPT = "blurry, watermark, text overlay, low quality, distorted faces, cartoon, anime, oversaturated, noisy"
+NEGATIVE_PROMPT = "waxy skin, plastic look, CGI, 3D render, cartoon, anime, illustration, blurry, watermark, text overlay, low quality, distorted, bad anatomy, noise, over-sharpened"
 CAMERA_MOTIONS = {"static", "pan_left", "pan_right", "dolly_in", "dolly_out", "tilt_up", "tilt_down", "orbit"}
 PRIMARY_KEYWORDS = {"ai", "video", "creator", "reels", "shorts", "workflow", "automation", "cinematic", "content"}
 
@@ -44,6 +44,12 @@ CRITICAL RULES:
 3. SHARE-WORTHY ANGLE: Use POV/identity language or a practical insight someone would DM to a friend.
 4. CAPTION COMPLETENESS: voiceover is short, punchy, semantic-search-friendly, and understandable muted.
 5. NO INTRO CARD. NO OUTRO CARD. NEVER.
+
+PROMPT ENGINEERING RULES FOR ULTRA-HIGH QUALITY (FLUX/WAN):
+- FLUX.1 [schnell] is neutral and does not auto-beautify prompts. Therefore, your visual prompts must be EXTREMELY descriptive to achieve a Midjourney-like "wow-factor".
+- Avoid generic descriptions (e.g. "a man smiling"). Instead, describe: "a close-up portrait of a 30-year-old software engineer, subtle smile, showing realistic skin pores and fine stubble, soft volumetric rim lighting from his laptop screen, shot on ARRI Alexa, 85mm lens, f/1.8".
+- Specify the camera, lens, lighting direction (e.g., side-lit, backlit, Rembrandt lighting), and texture details (e.g., individual dust particles, concrete pores, fabric weave).
+- Always enforce high-fidelity realism to suppress the waxy "AI render" look.
 
 VISUAL PROMPT TEMPLATE:
 [SHOT TYPE], [CAMERA MOVEMENT], [SUBJECT + ACTION], [ENVIRONMENT], [LIGHTING], [COLOR GRADE], [MOOD], cinematic 4K, ultra-detailed, photorealistic, {style_suffix}. {format_clause}

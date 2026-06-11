@@ -59,6 +59,21 @@ def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     work = Path(work_dir)
     w, h, fps = _dims(script.get("format", "reels"))
+    style = script.get("style", "cinematic")
+    
+    # Style-specific color grading filter values for FFmpeg
+    grading = "eq=contrast=1.04:saturation=1.03"
+    if style == "brutalist":
+        grading = "eq=contrast=1.15:saturation=0.5"
+    elif style == "neon":
+        grading = "eq=contrast=1.05:saturation=1.15"
+    elif style == "dreamy":
+        grading = "eq=contrast=0.98:brightness=0.01:saturation=1.02"
+    elif style == "documentary":
+        grading = "eq=contrast=1.02:saturation=0.95"
+    elif style == "golden_hour":
+        grading = "eq=contrast=1.03:saturation=1.05"
+
     durations = [float(scene.get("duration_seconds", 5)) for scene in script["scenes"]]
     voiced: list[Path] = []
     for scene, duration in zip(script["scenes"], durations):
@@ -67,7 +82,7 @@ def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_
         norm = work / f"norm_scene_{n:02d}.mp4"
         voice = work / f"voice_scene_{n:02d}.mp3"
         merged = work / f"scene_with_voice_{n:02d}.mp4"
-        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},setpts=PTS-STARTPTS"
+        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},{grading},unsharp=3:3:0.5:3:3:0.5,fps={fps},setpts=PTS-STARTPTS"
         _run(["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(raw), "-vf", vf, "-vcodec", "libx264", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p", "-preset", "slow", "-crf", "18", "-t", str(duration), "-an", str(norm)])
         _run(["ffmpeg", "-y", "-i", str(norm), "-i", str(voice), "-vcodec", "copy", "-acodec", "aac", "-b:a", "192k", "-af", "apad", "-shortest", "-t", str(duration), str(merged)])
         voiced.append(merged)
