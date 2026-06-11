@@ -22,6 +22,8 @@ def _dimensions(format_name: str) -> tuple[int, int, str, str]:
 
 
 def _wake_client(space_id: str, hf_token: str | None) -> Client:
+    if not hf_token:
+        hf_token = None
     try:
         return Client(space_id, hf_token=hf_token)
     except Exception as exc:
@@ -29,7 +31,23 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
         if "404" in exc_str or "not found" in exc_str or "repository" in exc_str:
             LOGGER.error("Space %s not found (404/Not Found). Bypassing wake sleep.", space_id)
             raise
-        LOGGER.warning("Waking sleeping Space %s after error: %s. Sleeping 90s...", space_id, exc)
+        
+        # Check if the space is actually sleeping/building/paused
+        try:
+            from huggingface_hub import space_info
+            info = space_info(space_id, token=hf_token)
+            stage = getattr(getattr(info, "runtime", None), "stage", "RUNNING")
+            LOGGER.info("Space %s runtime stage: %s", space_id, stage)
+            if stage not in ["SLEEPING", "PAUSED", "BUILDING"]:
+                LOGGER.error("Space %s is in stage %s but failed: %s. Raising immediately.", space_id, stage, exc)
+                raise
+        except Exception as hub_exc:
+            if "not found" in str(hub_exc).lower():
+                LOGGER.error("Space %s not found via Hub check: %s. Raising immediately.", space_id, hub_exc)
+                raise
+            LOGGER.warning("Could not check space status via huggingface_hub: %s", hub_exc)
+            
+        LOGGER.warning("Waking sleeping/building Space %s after error: %s. Sleeping 90s...", space_id, exc)
         time.sleep(90)
         try:
             return Client(space_id, hf_token=hf_token)
@@ -93,27 +111,69 @@ def _submit_variants(client: Client, api_names: list[str] | str, output_path: Pa
 
 
 def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
-    _, _, aspect_ratio, resolution = _dimensions(format_name)
+    _, _, _, resolution = _dimensions(format_name)
+    width_val, height_val = map(int, resolution.split("x"))
     client = _wake_client("Lightricks/ltx-video-distilled", hf_token)
+    duration = int(scene.get("duration_seconds", 5))
+    # ui_frames_to_use is usually 8 frames per second + 1
+    frames = duration * 8 + 1
+    
     base = {
         "prompt": scene["visual_prompt"],
-        "negative_prompt": scene.get("negative_prompt", ""),
-        "duration": int(scene.get("duration_seconds", 5)),
-        "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
-        "camera_motion": scene.get("camera_motion", "static"),
+        "negative_prompt": scene.get("negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted"),
+        "input_image_filepath": None,
+        "input_video_filepath": None,
+        "height_ui": float(height_val),
+        "width_ui": float(width_val),
+        "mode": "text-to-video",
+        "duration_ui": float(duration),
+        "ui_frames_to_use": float(frames),
+        "seed_ui": 42.0,
+        "randomize_seed": True,
+        "ui_guidance_scale": 3.0,
+        "improve_texture_flag": True,
     }
-    return _submit_variants(client, ["/generate", "/predict", "/generate_video"], output_path, [base, {k: v for k, v in base.items() if k != "camera_motion"}, {"prompt": base["prompt"]}])
+    return _submit_variants(client, ["/text_to_video"], output_path, [base])
 
 
 def _generate_wan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
-    _, _, aspect_ratio, resolution = _dimensions(format_name)
-    client = _wake_client("Wan-AI/Wan2.1", hf_token)
-    return _submit_variants(client, ["/generate_video", "/generate", "/predict"], output_path, [
-        {"prompt": scene["visual_prompt"], "negative_prompt": scene.get("negative_prompt", ""), "aspect_ratio": aspect_ratio, "duration": int(scene.get("duration_seconds", 5))},
-        {"prompt": scene["visual_prompt"], "resolution": resolution},
-        {"prompt": scene["visual_prompt"]},
-    ])
+    # 1. Generate starting frame image using FLUX first
+    temp_image = output_path.with_suffix(".png")
+    if not _try_flux_image(scene["visual_prompt"], temp_image, hf_token):
+        LOGGER.warning("FLUX image generation failed for Wan input image.")
+        return False
+        
+    # 2. Call image-to-video on Wan Space
+    client = _wake_client("multimodalart/wan2-1-fast", hf_token)
+    if format_name == "reels":
+        width, height = 480, 864  # Multiple of 32
+    else:
+        width, height = 864, 480  # Multiple of 32
+        
+    duration = int(scene.get("duration_seconds", 5))
+    
+    base = {
+        "input_image": str(temp_image),
+        "prompt": scene["visual_prompt"],
+        "height": float(height),
+        "width": float(width),
+        "negative_prompt": "Bright tones, overexposed, static, blurred details, subtitles, watermark, text, signature",
+        "duration_seconds": float(duration),
+        "guidance_scale": 6.0,
+        "steps": 4.0,  # Wan fast uses 4 steps
+        "seed": 42.0,
+        "randomize_seed": True,
+    }
+    
+    success = _submit_variants(client, ["/generate_video"], output_path, [base])
+    
+    # Clean up temp image
+    if temp_image.exists():
+        try:
+            temp_image.unlink()
+        except Exception:
+            pass
+    return success
 
 
 def _generate_hunyuan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
@@ -134,7 +194,20 @@ def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bo
     for space in spaces:
         try:
             client = _wake_client(space, hf_token)
-            if _submit_variants(client, ["/infer", "/predict"], output_image, [{"prompt": prompt}, {"prompt": prompt, "seed": 0}]):
+            variants = [
+                {
+                    "prompt": prompt,
+                    "width": 512.0,
+                    "height": 512.0,
+                    "num_inference_steps": 4.0,
+                    "seed": 0.0,
+                    "randomize_seed": True
+                },
+                {
+                    "prompt": prompt
+                }
+            ]
+            if _submit_variants(client, ["/infer", "/predict"], output_image, variants):
                 return True
         except Exception as exc:
             LOGGER.warning("FLUX image fallback failed for space %s: %s", space, exc)
@@ -155,7 +228,7 @@ def _ken_burns(scene: dict[str, Any], format_name: str, output_path: Path, zoom_
 
 ADAPTERS: list[tuple[str, Callable[[dict[str, Any], str, Path, str | None], bool]]] = [
     ("Lightricks/ltx-video-distilled", _generate_ltx),
-    ("Wan-AI/Wan2.1", _generate_wan),
+    ("multimodalart/wan2-1-fast", _generate_wan),
 ]
 
 
