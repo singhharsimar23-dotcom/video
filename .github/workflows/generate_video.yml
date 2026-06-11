@@ -24,8 +24,9 @@ on:
         type: string
         default: ''
       benchmark:
-        type: boolean
-        default: false
+        type: choice
+        options: ['false', 'true']
+        default: 'false'
       job_id:
         type: string
         default: ''
@@ -69,7 +70,6 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
-
 
       - name: Benchmark creative system
         if: ${{ env.BENCHMARK == 'true' }}
