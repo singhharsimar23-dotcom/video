@@ -14,7 +14,7 @@ import requests
 from gradio_client import Client
 
 LOGGER = logging.getLogger(__name__)
-FLUX_SPACE = "black-forest-labs/FLUX.2-dev-space"
+FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
 
 
 def _dimensions(format_name: str) -> tuple[int, int, str, str]:
@@ -83,7 +83,7 @@ def _submit_variants(client: Client, api_name: str, output_path: Path, variants:
 
 def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
     _, _, aspect_ratio, resolution = _dimensions(format_name)
-    client = _wake_client("Lightricks/LTX-2-3-space", hf_token)
+    client = _wake_client("Lightricks/LTX-Video", hf_token)
     base = {
         "prompt": scene["visual_prompt"],
         "negative_prompt": scene.get("negative_prompt", ""),
@@ -97,7 +97,7 @@ def _generate_ltx(scene: dict[str, Any], format_name: str, output_path: Path, hf
 
 def _generate_wan(scene: dict[str, Any], format_name: str, output_path: Path, hf_token: str | None) -> bool:
     _, _, aspect_ratio, resolution = _dimensions(format_name)
-    client = _wake_client("Wan-AI/Wan2.7-T2V-14B", hf_token)
+    client = _wake_client("Wan-AI/Wan2.1-T2V-14B", hf_token)
     return _submit_variants(client, "/generate_video", output_path, [
         {"prompt": scene["visual_prompt"], "negative_prompt": scene.get("negative_prompt", ""), "aspect_ratio": aspect_ratio, "duration": int(scene.get("duration_seconds", 5))},
         {"prompt": scene["visual_prompt"], "resolution": resolution},
@@ -136,8 +136,8 @@ def _ken_burns(scene: dict[str, Any], format_name: str, output_path: Path, zoom_
 
 
 ADAPTERS: list[tuple[str, Callable[[dict[str, Any], str, Path, str | None], bool]]] = [
-    ("Lightricks/LTX-2-3-space", _generate_ltx),
-    ("Wan-AI/Wan2.7-T2V-14B", _generate_wan),
+    ("Lightricks/LTX-Video", _generate_ltx),
+    ("Wan-AI/Wan2.1-T2V-14B", _generate_wan),
     ("tencent/HunyuanVideo", _generate_hunyuan),
 ]
 
