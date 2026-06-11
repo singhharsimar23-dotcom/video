@@ -35,7 +35,7 @@ export async function triggerWorkflow(inputs: WorkflowInputs) {
 
 export async function getLatestRun(): Promise<RunStatus> {
   assertRepo();
-  const response = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers: headers(), cache: 'no-store' });
+  const response = await fetch(`/api/status/`, { cache: 'no-store' });
   if (!response.ok) throw new Error(`Could not load latest run: ${response.status}`);
   const data = await response.json();
   const run = data.workflow_runs?.[0];
@@ -110,7 +110,7 @@ async function mapRun(run: any): Promise<RunStatus> {
 
 async function getRunStepStatus(runId: number): Promise<{ label: string; progress: number } | null> {
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs`, { headers: headers(), cache: 'no-store' });
+    const response = await fetch(`/api/status/?runId=${runId}`, { cache: 'no-store' });
     if (!response.ok) return null;
     const data = await response.json();
     const steps = data.jobs?.flatMap((job: any) => job.steps || []) || [];
