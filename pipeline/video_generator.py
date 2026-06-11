@@ -18,7 +18,7 @@ FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
 
 
 def _dimensions(format_name: str) -> tuple[int, int, str, str]:
-    return (1080, 1920, "9:16", "1080x1920") if format_name == "reels" else (1920, 1080, "16:9", "1920x1080")
+    return (1080, 1920, "9:16", "480x848") if format_name == "reels" else (1920, 1080, "16:9", "848x480")
 
 
 def _wake_client(space_id: str, hf_token: str | None) -> Client:
@@ -126,12 +126,19 @@ def _generate_hunyuan(scene: dict[str, Any], format_name: str, output_path: Path
 
 
 def _try_flux_image(prompt: str, output_image: Path, hf_token: str | None) -> bool:
-    try:
-        client = _wake_client(FLUX_SPACE, hf_token)
-        return _submit_variants(client, "/infer", output_image, [{"prompt": prompt}, {"prompt": prompt, "seed": 0}])
-    except Exception as exc:
-        LOGGER.warning("FLUX image fallback failed: %s", exc)
-        return False
+    spaces = [
+        FLUX_SPACE,
+        "ap123/Flux.1-Schnell",
+        "mukaist/FLUX.1-schnell"
+    ]
+    for space in spaces:
+        try:
+            client = _wake_client(space, hf_token)
+            if _submit_variants(client, ["/infer", "/predict"], output_image, [{"prompt": prompt}, {"prompt": prompt, "seed": 0}]):
+                return True
+        except Exception as exc:
+            LOGGER.warning("FLUX image fallback failed for space %s: %s", space, exc)
+    return False
 
 
 def _ken_burns(scene: dict[str, Any], format_name: str, output_path: Path, zoom_in: bool, hf_token: str | None) -> None:

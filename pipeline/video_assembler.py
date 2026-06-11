@@ -67,8 +67,8 @@ def assemble_video(script_path: str = "script.json", work_dir: str = ".", music_
         norm = work / f"norm_scene_{n:02d}.mp4"
         voice = work / f"voice_scene_{n:02d}.mp3"
         merged = work / f"scene_with_voice_{n:02d}.mp4"
-        vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},setpts=PTS-STARTPTS"
-        _run(["ffmpeg", "-y", "-i", str(raw), "-vf", vf, "-vcodec", "libx264", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p", "-preset", "slow", "-crf", "18", "-t", str(duration), "-an", str(norm)])
+        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},setpts=PTS-STARTPTS"
+        _run(["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(raw), "-vf", vf, "-vcodec", "libx264", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p", "-preset", "slow", "-crf", "18", "-t", str(duration), "-an", str(norm)])
         _run(["ffmpeg", "-y", "-i", str(norm), "-i", str(voice), "-vcodec", "copy", "-acodec", "aac", "-b:a", "192k", "-af", "apad", "-shortest", "-t", str(duration), str(merged)])
         voiced.append(merged)
     assembled_raw = work / "assembled_raw.mp4"

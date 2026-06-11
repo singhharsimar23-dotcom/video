@@ -15,7 +15,7 @@ def _ass_time(ms: int) -> str:
 
 def _style(format_name: str) -> tuple[int, int, int, int]:
     if format_name == "reels":
-        return 1080, 1920, 72, 200
+        return 1080, 1920, 72, 850
     return 1920, 1080, 48, 80
 
 

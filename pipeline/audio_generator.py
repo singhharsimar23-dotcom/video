@@ -53,18 +53,7 @@ async def _synthesize_with_timing(text: str, voice: str, output_path: str, timin
 def _fit_scene_duration(script: dict[str, Any], scene: dict[str, Any], audio_duration: float) -> None:
     current = float(scene.get("duration_seconds", 5))
     required = round(audio_duration + 0.35, 2)
-    if required <= current:
-        return
-    if script.get("format") == "reels":
-        max_by_role = {"hook": 4.5, "build": 10.5, "twist": 10.5, "payoff": 7.0}.get(scene.get("role"), 10.0)
-        new_duration = min(required, max_by_role)
-        projected = sum(float(s.get("duration_seconds", 5)) for s in script["scenes"]) - current + new_duration
-        if projected <= 45:
-            scene["duration_seconds"] = new_duration
-        else:
-            scene["audio_warning"] = f"TTS duration {audio_duration:.2f}s may exceed scene; total cap prevents expansion"
-    else:
-        scene["duration_seconds"] = max(current, required)
+    scene["duration_seconds"] = max(current, required)
 
 
 def generate_audio(script_path: str = "script.json", voice_key: str = "female", output_dir: str = ".", timed_script_path: str | None = None) -> list[str]:

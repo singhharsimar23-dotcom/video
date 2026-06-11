@@ -113,6 +113,28 @@ def _fallback_script(topic: str, format_name: str, style: str, variant: int = 0)
 
 def _extract_json(text: str) -> Any:
     text = text.strip()
+    first_bracket = text.find('[')
+    first_brace = text.find('{')
+    
+    start_idx = -1
+    json_str = text
+    if first_bracket != -1 and (first_brace == -1 or first_bracket < first_brace):
+        start_idx = first_bracket
+        end_bracket = text.rfind(']')
+        if end_bracket != -1:
+            json_str = text[start_idx:end_bracket + 1]
+    elif first_brace != -1:
+        start_idx = first_brace
+        end_brace = text.rfind('}')
+        if end_brace != -1:
+            json_str = text[start_idx:end_brace + 1]
+            
+    if start_idx != -1:
+        try:
+            return json.loads(json_str)
+        except Exception:
+            pass
+            
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?", "", text).strip()
         text = re.sub(r"```$", "", text).strip()
