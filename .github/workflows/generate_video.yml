@@ -43,11 +43,10 @@ env:
   BENCHMARK: ${{ github.event.inputs.benchmark || 'false' }}
   RELEASE_TAG: video-${{ github.run_id }}
 
-timeout-minutes: 120
-
 jobs:
   generate:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
