@@ -33,7 +33,7 @@ jobs:
       - name: Derive base path
         run: echo "NEXT_PUBLIC_BASE_PATH=/${GITHUB_REPOSITORY#*/}" >> "$GITHUB_ENV"
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Build static dashboard
         env:
           NEXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
