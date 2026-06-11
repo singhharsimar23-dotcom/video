@@ -25,7 +25,7 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
     if not hf_token:
         hf_token = None
     try:
-        return Client(space_id, hf_token=hf_token)
+        return Client(space_id, token=hf_token)
     except Exception as exc:
         exc_str = str(exc).lower()
         if "404" in exc_str or "not found" in exc_str or "repository" in exc_str:
@@ -50,7 +50,7 @@ def _wake_client(space_id: str, hf_token: str | None) -> Client:
         LOGGER.warning("Waking sleeping/building Space %s after error: %s. Sleeping 90s...", space_id, exc)
         time.sleep(90)
         try:
-            return Client(space_id, hf_token=hf_token)
+            return Client(space_id, token=hf_token)
         except Exception as retry_exc:
             LOGGER.error("Failed to wake space %s on retry: %s", space_id, retry_exc)
             raise
