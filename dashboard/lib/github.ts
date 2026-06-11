@@ -1,4 +1,5 @@
 import type { LibraryVideo, RunStatus, WorkflowInputs } from './types';
+import { getLibraryFromSupabase } from './supabase';
 
 const repo = process.env.NEXT_PUBLIC_GITHUB_REPO || '';
 const branch = process.env.NEXT_PUBLIC_GITHUB_BRANCH || 'main';
@@ -49,6 +50,19 @@ export async function getLatestRun(): Promise<RunStatus> {
 }
 
 export async function getLibrary(): Promise<LibraryVideo[]> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      const dbData = await getLibraryFromSupabase();
+      if (dbData && dbData.length > 0) {
+        return dbData;
+      }
+    } catch (error) {
+      console.warn("Failed to fetch library from Supabase, falling back to GitHub:", error);
+    }
+  }
+
   if (!repo || !repo.includes('/')) return [];
   const raw = `https://raw.githubusercontent.com/${repo}/${branch}/data/library.json?ts=${Date.now()}`;
   const response = await fetch(raw, { cache: 'no-store' });

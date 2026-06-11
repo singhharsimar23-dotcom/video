@@ -12,7 +12,7 @@ export default function VideoLibrary({ videos }: { videos: LibraryVideo[] }) {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [videos, format, style]);
   return (
     <>
-      <div className="library-toolbar">
+      <div className="library-filters">
         <select className="select" style={{ maxWidth: 220 }} value={format} onChange={(event) => setFormat(event.target.value as 'all' | VideoFormat)}>
           <option value="all">All formats</option><option value="reels">Reels</option><option value="longform">Long-form</option>
         </select>
@@ -23,16 +23,21 @@ export default function VideoLibrary({ videos }: { videos: LibraryVideo[] }) {
       <div className="library-grid">
         {filtered.map((video) => (
           <article className={`video-card ${video.format}`} key={video.id}>
-            <div className="thumb">{video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : 'Thumbnail'}</div>
-            <div className="card-body">
-              <span className="badge">{video.badge}</span>{video.creativeScore ? <span className="badge">Score {video.creativeScore.score}</span> : null}
-              <strong>{video.title}</strong>
-              <small style={{ color: '#94a3b8' }}>{new Date(video.date).toLocaleDateString()} · {video.duration}s · {video.style}</small>
-              <div className="card-actions">
-                {video.youtubeUrl ? <a className="secondary" href={video.youtubeUrl} target="_blank">YouTube</a> : null}
-                <a className="secondary" href={video.downloadUrl} target="_blank">Download</a>
-                {video.instagramExportUrl ? <a className="secondary" href={video.instagramExportUrl} target="_blank">IG package</a> : null}
-                {video.instagramCaption ? <button className="secondary" onClick={() => navigator.clipboard?.writeText(video.instagramCaption || '')}>Copy IG caption</button> : null}
+            <div className="video-thumb">
+              {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span className="thumb-placeholder">🎬</span>}
+            </div>
+            <div className="video-body">
+              <div className="video-tags">
+                <span className="tag violet">{video.badge}</span>
+                {video.creativeScore ? <span className="tag gold">Score {video.creativeScore.score}</span> : null}
+              </div>
+              <h3 className="video-title">{video.title}</h3>
+              <p className="video-meta">{new Date(video.date).toLocaleDateString()} · {video.duration}s · {video.style}</p>
+              <div className="video-actions">
+                {video.youtubeUrl ? <a className="btn-secondary" href={video.youtubeUrl} target="_blank">YouTube</a> : null}
+                <a className="btn-secondary" href={video.downloadUrl} target="_blank">Download</a>
+                {video.instagramExportUrl ? <a className="btn-secondary" href={video.instagramExportUrl} target="_blank">IG package</a> : null}
+                {video.instagramCaption ? <button className="btn-secondary" onClick={() => navigator.clipboard?.writeText(video.instagramCaption || '')}>Copy IG caption</button> : null}
               </div>
             </div>
           </article>

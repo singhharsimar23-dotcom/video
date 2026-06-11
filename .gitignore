@@ -1,0 +1,23 @@
+# Dependency directories
+node_modules/
+dashboard/node_modules/
+
+# Next.js build output
+.next/
+dashboard/.next/
+out/
+dashboard/out/
+
+# Python cache and bytecode
+__pycache__/
+*.pyc
+pipeline/__pycache__/
+
+# Local environment files and secrets
+.env.local
+.env.production
+.env
+dashboard/.env.local
+dashboard/.env.production
+dashboard/.env
+client_secret.json

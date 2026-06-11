@@ -178,6 +178,8 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
           DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/final_video.mp4
           INSTAGRAM_EXPORT_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/${{ github.run_id }}_instagram_export.zip
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python pipeline/youtube_uploader.py --script script.json --video final_video.mp4 --library data/library.json
 
       - name: Upload Instagram export package

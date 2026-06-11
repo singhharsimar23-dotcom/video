@@ -34,7 +34,7 @@ export default function GeneratePage() {
 
   return (
     <>
-      <section className="hero">
+      <section className="studio-layout">
         <div className="panel">
           <p className="kicker">Generate</p>
           <h2 style={{ fontSize: 44, letterSpacing: '-.05em', margin: '8px 0 18px' }}>Retention-first video command deck.</h2>

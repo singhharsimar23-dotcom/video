@@ -11,12 +11,13 @@ const defaultScenes: ScenePreview[] = [
 
 export default function PreviewPane({ format, scenes = defaultScenes }: { format: VideoFormat; scenes?: ScenePreview[] }) {
   return (
-    <div className="device-wrap">
+    <div className="preview-wrap">
+      <span className="preview-label">Retention Flow Preview</span>
       <div className={`device ${format}`}>
-        <div className="screen">
-          <span className="badge">{format === 'reels' ? '9:16 Reels / Shorts' : '16:9 Long-form'}</span>
+        <div className="device-screen">
+          <span className="device-badge">{format === 'reels' ? '9:16 Reels / Shorts' : '16:9 Long-form'}</span>
           {scenes.slice(0, format === 'reels' ? 4 : 6).map((scene) => (
-            <article className="scene-card" key={scene.scene_number}>
+            <article className="scene-chip" key={scene.scene_number}>
               <b>Scene {scene.scene_number} · {scene.role} · {scene.duration_seconds}s</b>
               <p>{scene.visual_prompt}</p>
             </article>

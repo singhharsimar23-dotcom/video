@@ -95,6 +95,50 @@ def _library_entry(script: dict[str, Any], video_path: str, youtube_url: str | N
     }
 
 
+
+def _upsert_supabase(entry: dict[str, Any]) -> None:
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+    if not supabase_url or not supabase_key:
+        print("Supabase credentials not set. Skipping Supabase write.")
+        return
+    db_entry = {
+        "id": entry.get("id"),
+        "title": entry.get("title"),
+        "topic": entry.get("topic"),
+        "share_angle": entry.get("shareAngle"),
+        "date": entry.get("date"),
+        "duration": entry.get("duration"),
+        "format": entry.get("format"),
+        "style": entry.get("style"),
+        "badge": entry.get("badge"),
+        "thumbnail_url": entry.get("thumbnailUrl"),
+        "youtube_url": entry.get("youtubeUrl"),
+        "download_url": entry.get("downloadUrl"),
+        "instagram_caption": entry.get("instagramCaption"),
+        "instagram_export_url": entry.get("instagramExportUrl"),
+        "posting_status": entry.get("postingStatus"),
+        "status": entry.get("status"),
+        "creative_score": entry.get("creativeScore"),
+        "algorithm_signals": entry.get("algorithmSignals"),
+    }
+    url = f"{supabase_url.rstrip('/')}/rest/v1/videos"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
+    try:
+        import requests
+        print(f"Upserting to Supabase table 'videos' (id={db_entry['id']})...")
+        response = requests.post(url, json=db_entry, headers=headers, timeout=15)
+        response.raise_for_status()
+        print("Successfully upserted entry to Supabase.")
+    except Exception as exc:
+        print(f"Error upserting to Supabase: {exc}")
+
+
 def upload_to_youtube(script_path: str = "script.json", video_path: str = "final_video.mp4", library_path: str = "data/library.json") -> dict[str, Any]:
     script = json.loads(Path(script_path).read_text(encoding="utf-8"))
     thumbnail = _extract_thumbnail(video_path)
@@ -134,6 +178,7 @@ def upload_to_youtube(script_path: str = "script.json", video_path: str = "final
             status = f"youtube-failed-release-confirmed: {exc}"
     entry = _library_entry(script, video_path, youtube_url, thumbnail, status, download_url, instagram_zip)
     _append_library(entry, library_path)
+    _upsert_supabase(entry)
     Path("publish_result.json").write_text(json.dumps(entry, indent=2), encoding="utf-8")
     return entry
 
